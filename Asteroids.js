@@ -1,0 +1,827 @@
+
+// <------------- All Constants
+
+// constant for setting frames per second
+const FPS = 60;
+
+// constant for ship height in pixels
+const shipSize = 30;
+
+//constant for ship turning speed in degrees per second
+const turnSpeed = 360;
+
+// acceleration of the ship in pixels per second per second
+const shipThrust = 5;
+
+// duration of the ship's destruction explosion
+const shipDestruction = 0.3;
+
+// duration of the ship's invulnerability after destruction in seconds
+const shipInvulnerable = 3;
+
+// duration of the ship blinking frequency during invulnerability in seconds
+const shipBlinking = 0.1;
+
+// maximum number of lasers on screen at once
+const laserMax = 10;
+
+// speed of lasers in pixels per second
+const laserSpeed = 500;
+
+// the maximum distance a laser can travel as a fraction of the screen width
+const laserReach = 0.6;
+
+// duration of the lasers' explosion in seconds
+const laserExplodeDuration = 0.1;
+
+// display the collision boundary of the ship
+const showBounding = false;
+
+// show or hide ship's centre dot
+const showCentreDot = false;
+
+// friction coefficient of space (0 = no friction, 1 = lots of friction)
+const friction = 0.7;
+
+//starting number of Asteroids
+const asteroidsNumber = 1;
+
+// max starting speed of asteroids in pixels per second
+const asteroidSpeed = 50;
+
+// starting size of asteroids in pixels
+const asteroidSize = 100;
+
+// average number of vertices for each asteroid
+const asteroidVertex = 10;
+
+// roughness or jaggedness of asteroids (0 is none, 1 is very rough)
+const asteroidJag = 0.5;
+
+// points scored for destroying large asteroid
+const asteroidPointsLarge = 20;
+
+// points scored for destroying medium asteroid
+const asteroidPointsMedium = 50;
+
+// points scored for destroying small asteroid
+const asteroidPointsSmall = 100;
+
+// fade time of text in seconds
+const textFadeTime = 2.5;
+
+// text font size in pixels
+const textSize = 40;
+
+// number of lives
+const gameLives = 3;
+
+// save key for local storage of highscore
+const saveKeyScore = "highscore";
+
+// switch boolean for setting the sound FX on or off
+const soundOn = true;
+
+// switch boolean for setting the sound FX on or off
+const MusicOn = true;
+
+/** @type {HTMLCanvasElement} */
+var canvas = document.getElementById("myCanvas");
+var width = 1200;
+var height = 800;
+canvas.width = width;
+canvas.height = height;
+var context = canvas.getContext("2d");
+
+// set up sound effects
+var fxLaser = new Sound("sounds/laser.m4a", 5, 0.1);
+var fxExplosion = new Sound("sounds/explode.m4a", 1, 0.1);
+var fxLaserHit = new Sound("sounds/hit.m4a", 5, 0.1);
+var fxBurn = new Sound("sounds/thrust.m4a", 1, 0.1);
+
+// set up music
+var music = new Music();
+var asteroidsLeft, asteroidsTotal;
+
+//game parameters
+var level, roids, ship, text, textAlpha, lives, score, highScore;
+newGame();
+
+// set up event handlers
+document.addEventListener("keydown", keyDown);
+document.addEventListener("keyup", keyUp);
+
+// game loop initialize
+setInterval(update, 1000 / FPS);
+
+function createAsteroidBelt() {
+  asteroids = [];
+  asteroidsTotal = (asteroidsNumber + level) * 7;
+  asteroidsLeft = asteroidsTotal;
+  var x, y;
+  for (var i = 0; i < asteroidsNumber + level; i++) {
+    do {
+      x = Math.floor(Math.random() * canvas.width);
+      y = Math.floor(Math.random() * canvas.height);
+    } while (
+      distBetweenPoints(ship.x, ship.y, x, y) <
+      asteroidSize * 2 + ship.r
+    );
+    asteroids.push(newAsteroid(x, y, Math.ceil(asteroidSize / 2)));
+  }
+}
+
+//function destroying the Asteroid
+function destroyAsteroid(index) {
+  var x = asteroids[index].x;
+  var y = asteroids[index].y;
+  var r = asteroids[index].r;
+
+  //split asteroid in two if necessary
+  if (r == Math.ceil(asteroidSize / 2)) {
+    asteroids.push(newAsteroid(x, y, Math.ceil(asteroidSize / 4)));
+    asteroids.push(newAsteroid(x, y, Math.ceil(asteroidSize / 4)));
+    score += asteroidPointsLarge;
+  } else if (r == Math.ceil(asteroidSize / 4)) {
+    asteroids.push(newAsteroid(x, y, Math.ceil(asteroidSize / 8)));
+    asteroids.push(newAsteroid(x, y, Math.ceil(asteroidSize / 8)));
+    score += asteroidPointsMedium;
+  } else {
+    score += asteroidPointsSmall;
+  }
+
+  // check highscore
+  if (score > highScore) {
+    highScore = score;
+    // locally storing highscore
+    localStorage.setItem(saveKeyScore, highScore);
+  }
+
+  // destroy the original asteroid
+  asteroids.splice(index, 1);
+  fxLaserHit.play();
+
+  // calculate the ratio of remaining asteroids to determine the music tempo
+  asteroidsLeft--;
+  music.setAsteroidRatio(asteroidsLeft == 0 ? 1 : (asteroidsLeft / asteroidsTotal));
+
+  // new level if all asteroids are destroyed
+  if (asteroids.length == 0) {
+    level++;
+    newLevel();
+  }
+}
+
+// this function determines the buffer between the ship and the zone where asteroids may be generated at start
+function distBetweenPoints(x1, y1, x2, y2) {
+  return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+}
+
+//function to draw the ship with given x, y positions and angle - colour is set to white by default, but can be altered (option)
+function drawShip(x, y, a, colour = "white") {
+  context.strokeStyle = colour;
+  context.lineWidth = shipSize / 20;
+  context.beginPath();
+  context.moveTo(
+    //nose of the ship
+    x + (4 / 3) * ship.r * Math.cos(a),
+    y - (4 / 3) * ship.r * Math.sin(a)
+  );
+  context.lineTo(
+    //rear left of ship
+    x - ship.r * ((2 / 3) * Math.cos(a) + Math.sin(a)),
+    y + ship.r * ((2 / 3) * Math.sin(a) - Math.cos(a))
+  );  
+  context.lineTo(
+    //rear right of ship
+    x - ship.r * ((2 / 3) * Math.cos(a) - Math.sin(a)),
+    y + ship.r * ((2 / 3) * Math.sin(a) + Math.cos(a))
+  );
+  context.closePath();
+  context.stroke();
+}
+
+//function for the explosion of the ship
+function explodeShip() {
+  ship.explodeTime = Math.ceil(shipDestruction * (FPS / 2));
+  fxExplosion.play();
+}
+
+//function Game Over (YEEEEAAAAAAHHH)
+function gameOver() {
+  ship.dead = true;
+  text = "Game Over";
+  textAlpha = 1.0;
+}
+
+//function for pressing keys
+function keyDown(/** @type {KeyboardEvent} */ ev) {
+  if (ship.dead) {
+    return;
+  }
+
+  switch (ev.keyCode) {
+    case 32: // spacebar (shoot laser)
+      shootLaser();
+      break;
+    case 37: // left arrow (rotate ship left)
+      ship.rot = ((turnSpeed / 180) * Math.PI) / FPS;
+      break;
+    case 38: // up arrow (thrust the ship forward)
+      ship.thrusting = true;
+      break;
+    case 39: //right arrow (rotate ship right)
+      ship.rot = ((-turnSpeed / 180) * Math.PI) / FPS;
+      break;
+  }
+}
+
+//function for releasing pressed keys
+function keyUp(/** @type {KeyboardEvent} */ ev) {
+  if (ship.dead) {
+    return;
+  }
+
+  switch (ev.keyCode) {
+    case 32: // spacebar (allow shooting again)
+      ship.canShoot = true;
+      break;
+    case 37: // left arrow (stop rotate ship left)
+      ship.rot = 0;
+      break;
+    case 38: // up arrow (stop thrust the ship forward)
+      ship.thrusting = false;
+      break;
+    case 39: //right arrow (stop rotate ship right)
+      ship.rot = 0;
+      break;
+  }
+}
+
+// create a new asteroid with given x, y positions and radius
+function newAsteroid(x, y, r) {
+  var levelMultiplier = 1 + 0.1 * level;
+  var asteroid = {
+    x: x,
+    y: y,
+    xVelocity:
+      ((Math.random() * asteroidSpeed * levelMultiplier) / (FPS / 2)) *
+      (Math.random() < 0.5 ? 1 : -1),
+    yVelocity:
+      ((Math.random() * asteroidSpeed * levelMultiplier) / (FPS / 2)) *
+      (Math.random() < 0.5 ? 1 : -1),
+    r: r,
+    a: Math.random() * Math.PI * 2, //in radians
+    vertex: Math.floor(
+      Math.random() * (asteroidVertex + 1) + asteroidVertex / 2
+    ),
+    offset: [],
+  };
+
+  //create the vertex offset array
+  for (var i = 0; i < asteroid.vertex; i++) {
+    asteroid.offset.push(
+      Math.random() * asteroidJag * 2 + 1 - asteroidJag
+    );
+  }
+  return asteroid;
+}
+
+//function to initialize new game
+function newGame() {
+  level = 0;
+  lives = gameLives;
+  score = 0;
+  highScore = localStorage.getItem(saveKeyScore);
+  ship = newShip();
+  music.setAsteroidRatio(1);
+
+  // get high score from local storage
+  var scoreString = localStorage.getItem(saveKeyScore);
+  if (scoreString == null) {
+    highScore = 0;
+  } else {
+    highScore = parseInt(scoreString);
+  }
+  newLevel();
+}
+
+//function to initialize new level
+function newLevel() {
+  text = "Level " + (level + 1);
+  textAlpha = 1.0;
+  createAsteroidBelt();
+}
+
+//function to set up a new ship
+function newShip() {
+  return {
+    x: canvas.width / 2,
+    y: canvas.height / 2,
+    r: shipSize / 2,
+    a: (90 / 180) * Math.PI, //angle converted to radians
+    blinkTime: Math.ceil(shipBlinking * (FPS / 2)),
+    blinkNumber: Math.ceil(shipInvulnerable / shipBlinking),
+    canShoot: true,
+    dead: false,
+    explodeTime: 0,
+    lasers: [],
+    rot: 0,
+    thrusting: false,
+    thrust: {
+      x: 0,
+      y: 0,
+    },
+  };
+}
+
+function shootLaser() {
+  //create laser object
+  if (ship.canShoot && ship.lasers.length < laserMax) {
+    ship.lasers.push({
+      //from the nose of the ship
+      x: ship.x + (4 / 3) * ship.r * Math.cos(ship.a),
+      y: ship.y - (4 / 3) * ship.r * Math.sin(ship.a),
+      xVelocity: (laserSpeed * Math.cos(ship.a)) / FPS,
+      yVelocity: -(laserSpeed * Math.sin(ship.a)) / FPS,
+      distance: 0,
+      explodeTime: 0,
+    });
+    fxLaser.play();
+  }
+  // prevent further shooting
+  ship.canShoot = false;
+}
+
+// music function
+function Music(){  
+  this.low = true;        
+  this.tempo = 1.0; //seconds per beat
+  this.beatTime = 0; // frames left until next beat
+
+  this.play = function() {
+    if (MusicOn){
+      if(this.low){
+       SoundFX(90, 0.1);
+     } else {
+        SoundFX(100, 0.1);
+      }
+     this.low = !this.low;
+    }
+  }
+
+  this.setAsteroidRatio = function(ratio) {
+    this.tempo = 1.0 - 0.75 * (1.0 - ratio);
+  }
+
+  this.tick = function() {
+    if(this.beatTime == 0) {
+      this.play();
+      this.beatTime = Math.ceil(this.tempo * FPS);
+    } else {
+      this.beatTime--;            
+    }
+  }
+}
+
+// sound function (number of sounds played simultaneously is set at 1, volume set default to max (1.0))
+function Sound(src, maxStreams = 1, vol = 1.0) {
+  this.streamNum = 0;
+  this.streams = [];
+  for (var i = 0; i < maxStreams; i++) {
+    this.streams.push(new Audio(src));
+    this.streams[i].volume = vol;
+  }
+  this.play = function () {
+    if (soundOn) {
+      this.streamNum = (this.streamNum + 1) % maxStreams;
+      this.streams[this.streamNum].play();
+    }
+  }
+  this.stop = function() {
+    this.streams[this.streamNum].pause();
+    this.streams[this.streamNum].currentTime=0;
+  }
+}
+
+ //Audiocontext - standard AudioContext
+ var audioCtx = new (window.AudioContext || window.webkitAudioContext || window.audioContext);
+
+ //Synthesizer for sound:
+ 
+ //duration is set at 100 ms by default
+ //frequency is set at 440 hz
+ //Volume is set at 1 (max) by default, 0 is sound off 
+ //The wave shape (type) is set at sine by default. Other options are square, sawtooth, triangle, and custom.
+ function SoundFX(frequency, volume, type, duration = 100) {
+     var oscillator = audioCtx.createOscillator();
+     var gainNode = audioCtx.createGain();
+ 
+     oscillator.connect(gainNode);
+     gainNode.connect(audioCtx.destination);
+ 
+     if (volume) { gainNode.gain.value = volume; }
+     if (frequency) { oscillator.frequency.value = frequency; }
+     if (type) { oscillator.type = type; }
+      
+     oscillator.start(audioCtx.currentTime);
+     oscillator.stop(audioCtx.currentTime + ((duration) / 1000));
+ };
+
+function update() {
+  //ship explode time greater than zero -> ship is destroyed
+  var exploding = ship.explodeTime > 0;
+
+  //ship blinking on even numbers
+  var blinkOn = ship.blinkNumber % 2 == 0;
+
+  // tick the music
+  music.tick();
+
+  //draw space
+  context.fillStyle = "#000000";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  //thrust the ship
+  if (ship.thrusting && !ship.dead) {          
+    ship.thrust.x += (shipThrust * Math.cos(ship.a)) / (FPS / 2);
+    ship.thrust.y -= (shipThrust * Math.sin(ship.a)) / (FPS / 2);
+    fxBurn.play();
+
+    // draw exhaust flame of thruster
+    if (!exploding && blinkOn) {
+      context.fillStyle = "red";
+      context.strokeStyle = "yellow";
+      context.lineWidth = shipSize / 10;
+      context.beginPath();
+
+      context.moveTo(
+        // rear left
+        ship.x -
+          ship.r * ((2 / 3) * Math.cos(ship.a) + 0.5 * Math.sin(ship.a)),
+        ship.y +
+          ship.r * ((2 / 3) * Math.sin(ship.a) - 0.5 * Math.cos(ship.a))
+      );
+      context.lineTo(
+        //rear center behind the ship
+        ship.x - ((ship.r * 5) / 3) * Math.cos(ship.a),
+        ship.y + ((ship.r * 5) / 3) * Math.sin(ship.a)
+      );
+      context.lineTo(
+        //rear right of ship
+        ship.x -
+          ship.r * ((2 / 3) * Math.cos(ship.a) - 0.5 * Math.sin(ship.a)),
+        ship.y +
+          ship.r * ((2 / 3) * Math.sin(ship.a) + 0.5 * Math.cos(ship.a))
+      );
+      context.closePath();
+      context.fill();
+      context.stroke();
+    }
+  } else {
+    ship.thrust.x -= (friction * ship.thrust.x) / (FPS / 2);
+    ship.thrust.y -= (friction * ship.thrust.y) / (FPS / 2);
+    fxBurn.stop();
+  }
+
+  //draw a triangular ship
+
+  if (!exploding) {
+    if (blinkOn && !ship.dead) {
+      drawShip(ship.x, ship.y, ship.a);
+    }
+
+    // handle the blinking of the ship
+    if (ship.blinkNumber > 0) {
+      //reduce blink time
+      ship.blinkTime--;
+
+      // reduce blink number
+      if (ship.blinkTime == 0) {
+        ship.blinkTime = Math.ceil(shipBlinking * FPS);
+        ship.blinkNumber--;
+      }
+    }
+  } else {
+    //draw the explosion
+    context.fillStyle = "darkred";
+    context.beginPath();
+    context.arc(ship.x, ship.y, ship.r * 1.7, 0, Math.PI * 2, false);
+    context.fill();
+    context.fillStyle = "red";
+    context.beginPath();
+    context.arc(ship.x, ship.y, ship.r * 1.4, 0, Math.PI * 2, false);
+    context.fill();
+    context.fillStyle = "orange";
+    context.beginPath();
+    context.arc(ship.x, ship.y, ship.r * 1.1, 0, Math.PI * 2, false);
+    context.fill();
+    context.fillStyle = "yellow";
+    context.beginPath();
+    context.arc(ship.x, ship.y, ship.r * 0.8, 0, Math.PI * 2, false);
+    context.fill();
+    context.fillStyle = "white";
+    context.beginPath();
+    context.arc(ship.x, ship.y, ship.r * 0.5, 0, Math.PI * 2, false);
+    context.fill();
+  }
+
+  // circle to design the hitdetection of ship and asteroids
+  if (showBounding) {
+    context.strokeStyle = "lime";
+    context.beginPath();
+    context.arc(ship.x, ship.y, ship.r, 0, Math.PI * 2, false);
+    context.stroke();
+  }
+
+  // draw the asteroids
+  var x, y, r, a, vertex, offset;
+  for (var i = 0; i < asteroids.length; i++) {
+    context.strokeStyle = "slategrey";
+    context.lineWidth = shipSize / 20;
+
+    //get the properties per asteroid in the array
+    x = asteroids[i].x;
+    y = asteroids[i].y;
+    r = asteroids[i].r;
+    a = asteroids[i].a;
+    vertex = asteroids[i].vertex;
+    offset = asteroids[i].offset;
+
+    // draw a path
+    context.beginPath();
+    context.moveTo(
+      x + r * offset[0] * Math.cos(a),
+      y + r * offset[0] * Math.sin(a)
+    );
+
+    // draw a shape (polygon)
+    for (var j = 1; j < vertex; j++) {
+      context.lineTo(
+        x + r * offset[j] * Math.cos(a + (j * Math.PI * 2) / vertex),
+        y + r * offset[j] * Math.sin(a + (j * Math.PI * 2) / vertex)
+      );
+    }
+    context.closePath();
+    context.stroke();
+
+    //draws circle around ship for the hit detection design
+    if (showBounding) {
+      context.strokeStyle = "lime";
+      context.beginPath();
+      context.arc(x, y, r, 0, Math.PI * 2, false);
+      context.stroke();
+    }
+  }
+
+  // centre dot ship
+  if (showCentreDot) {
+    context.fillStyle = "red";
+    context.fillRect(ship.x - 1, ship.y - 1, 2, 2);
+  }
+
+  // laser drawing
+  for (var i = 0; i < ship.lasers.length; i++) {
+    if (ship.lasers[i].explodeTime == 0) {
+      context.fillStyle = "salmon";
+      context.beginPath();
+      context.arc(
+        ship.lasers[i].x,
+        ship.lasers[i].y,
+        shipSize / 15,
+        0,
+        Math.PI * 2,
+        false
+      );
+      context.fill();
+    } else {
+      // draw explosion
+      context.fillStyle = "orangered";
+      context.beginPath();
+      context.arc(
+        ship.lasers[i].x,
+        ship.lasers[i].y,
+        ship.r * 0.75,
+        0,
+        Math.PI * 2,
+        false
+      );
+      context.fill();
+      context.fillStyle = "salmon";
+      context.beginPath();
+      context.arc(
+        ship.lasers[i].x,
+        ship.lasers[i].y,
+        ship.r * 0.5,
+        0,
+        Math.PI * 2,
+        false
+      );
+      context.fill();
+      context.fillStyle = "pink";
+      context.beginPath();
+      context.arc(
+        ship.lasers[i].x,
+        ship.lasers[i].y,
+        ship.r * 0.25,
+        0,
+        Math.PI * 2,
+        false
+      );
+      context.fill();
+    }
+  }
+
+  // draw the game text
+  if (textAlpha >= 0) {
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillStyle = "rgba(255, 255, 255, " + textAlpha + ")";
+    context.font = "small-caps " + textSize + "px Hyperspace";
+    context.fillText(text, canvas.width / 2, canvas.height * 0.75);
+    textAlpha -= 1.0 / textFadeTime / (FPS * 2);
+  } else if (ship.dead) {
+    newGame();
+  }
+
+  //draw the game lives left
+  var colourLife;
+  for (var i = 0; i < lives; i++) {
+    colourLife = exploding && i == lives - 1 ? "red" : "white";
+    drawShip(
+      shipSize + i * shipSize * 1.2,
+      2.8 * shipSize,
+      0.5 * Math.PI,
+      colourLife
+    );
+  }
+
+  // draw the score
+  context.textAlign = "left";
+  context.textBaseline = "middle";
+  context.fillStyle = "white";
+  context.font = textSize + "px Hyperspace";
+  context.fillText(score, shipSize, shipSize);
+
+  // draw the highscore
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillStyle = "white";
+  context.font = textSize * 0.50 + "px Hyperspace";
+  context.fillText(highScore, canvas.width / 2, shipSize);
+
+  // draw the copyright line at the bottom
+  context.textAlign = "center";
+  context.textBaseline = "bottom";
+  context.fillStyle = "white";
+  context.font = textSize * 0.50 + "px Hyperspace";
+  context.fillText('\u00A9' + "1979 RINTARI INC", canvas.width / 2, 0.98 * canvas.height);
+
+  //hit detection laser beam on asteroids
+  var xAsteroid, yAsteroid, rAsteroid, xLaser, yLaser;
+  for (var i = asteroids.length - 1; i >= 0; i--) {
+    //setting properties asteroid from array
+    xAsteroid = asteroids[i].x;
+    yAsteroid = asteroids[i].y;
+    rAsteroid = asteroids[i].r;
+
+    // loop over the laser beams
+    for (var j = ship.lasers.length - 1; j >= 0; j--) {
+      //setting properties laser from array
+      xLaser = ship.lasers[j].x;
+      yLaser = ship.lasers[j].y;
+
+      // detect hits
+      if (
+        ship.lasers[j].explodeTime == 0 &&
+        distBetweenPoints(xAsteroid, yAsteroid, xLaser, yLaser) <
+          rAsteroid
+      ) {
+        // destroy the asteroid and draw explosion
+        destroyAsteroid(i);
+        ship.lasers[j].explodeTime = Math.ceil(
+          laserExplodeDuration * FPS
+        );
+        break;
+      }
+    }
+  }
+
+  // asteroids collision check (when not exploding)
+  if (!exploding) {
+    // check only when ship is not invulnerable (not blinking)
+    if (ship.blinkNumber == 0 && !ship.dead) {
+      for (var i = 0; i < asteroids.length; i++) {
+        //if the position of the ship and any of the asteroids in the array is smaller then the radius of the ship plus radius of that asteroid, the ship and asteroids overlap (i.e. a crash has occurred)
+        if (
+          distBetweenPoints(
+            ship.x,
+            ship.y,
+            asteroids[i].x,
+            asteroids[i].y
+          ) <
+          ship.r + asteroids[i].r
+        ) {
+          explodeShip();
+          destroyAsteroid(i);
+          break; ///otherwise it continues to cycle and may destroy asteroids after ship exploded
+        }
+      }
+    }
+
+    //rotate ship
+    ship.a += ship.rot;
+
+    //move ship
+    ship.x += ship.thrust.x;
+    ship.y += ship.thrust.y;
+  } else {
+    // explode time reduced
+    ship.explodeTime--;
+
+    // reset ship after finishing destruction
+    if (ship.explodeTime == 0) {
+      lives--;
+      if (lives == 0) {
+        gameOver();
+      } else {
+        ship = newShip();
+      }
+    }
+  }
+
+  // the edge of the screen - reappearing when flying off
+  if (ship.x < 0 - ship.r) {
+    ship.x = canvas.width + ship.r;
+  } else if (ship.x > canvas.width + ship.r) {
+    ship.x = 0 - ship.r;
+  }
+  if (ship.y < 0 - ship.r) {
+    ship.y = canvas.height + ship.r;
+  } else if (ship.y > canvas.height + ship.r) {
+    ship.y = 0 - ship.r;
+  }
+
+  // move laser beams
+  for (var i = ship.lasers.length - 1; i >= 0; i--) {
+    //check distance travelled by beam
+    if (ship.lasers[i].distance > laserReach * canvas.width) {
+      ship.lasers.splice(i, 1);
+      continue;
+    }
+
+    // explosion handling
+    if (ship.lasers[i].explodeTime > 0) {
+      ship.lasers[i].explodeTime--;
+
+      //destroy laser beam after duration is done
+      if (ship.lasers[i].explodeTime == 0) {
+        ship.lasers.splice(i, 1);
+        continue;
+      }
+    } else {
+      // move the laserbeams
+      ship.lasers[i].x += ship.lasers[i].xVelocity;
+      ship.lasers[i].y += ship.lasers[i].yVelocity;
+
+      //calculate the distance of the laserbeam travelled
+      ship.lasers[i].distance += Math.sqrt(
+        Math.pow(ship.lasers[i].xVelocity, 2) +
+          Math.pow(ship.lasers[i].yVelocity, 2)
+      );
+    }
+
+    // laser beam reaches edge of screen
+    if (ship.lasers[i].x < 0) {
+      ship.lasers[i].x = canvas.width;
+    } else if (ship.lasers[i].x > canvas.width) {
+      ship.lasers[i].x = 0;
+    }
+    if (ship.lasers[i].y < 0) {
+      ship.lasers[i].y = canvas.height;
+    } else if (ship.lasers[i].y > canvas.height) {
+      ship.lasers[i].y = 0;
+    }
+  }
+
+  // move the asteroid
+  for (var i = 0; i < asteroids.length; i++) {
+    asteroids[i].x += asteroids[i].xVelocity;
+    asteroids[i].y += asteroids[i].yVelocity;
+
+    // handle the asteroids moving out of screen
+    if (asteroids[i].x < 0 - asteroids[i].r) {
+      asteroids[i].x = canvas.width + asteroids[i].r;
+    } else if (asteroids[i].x > canvas.width + asteroids[i].r) {
+      asteroids[i].x = 0 - asteroids[i].r;
+    }
+    if (asteroids[i].y < 0 - asteroids[i].r) {
+      asteroids[i].y = canvas.height + asteroids[i].r;
+    } else if (asteroids[i].y > canvas.height + asteroids[i].r) {
+      asteroids[i].y = 0 - asteroids[i].r;
+    }
+  }
+}
+
+
+
